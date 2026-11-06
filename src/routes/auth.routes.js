@@ -24,8 +24,34 @@ router.post(
     }).strict()
   ),
   wrap(async (req, res) => {
-    const { data, error } = await supabase.auth.signInWithPassword(req.body);
-    if (error) throw fail(401, 'Credenciales inválidas');
+    //const { data, error } = await supabase.auth.signInWithPassword(req.body);
+    //if (error) throw fail(401, 'Credenciales inválidas');
+    
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: req.body.email,
+  password: req.body.password
+});
+
+if (error) {
+  console.error("Error Supabase Auth:", {
+    name: error.name,
+    status: error.status,
+    code: error.code,
+    message: error.message
+  });
+
+  if (error.message === "Invalid login credentials") {
+    throw fail(401, "Credenciales inválidas");
+  }
+
+  if (error.message === "Email not confirmed") {
+    throw fail(403, "Correo no confirmado");
+  }
+
+  throw fail(502, "No se pudo completar la autenticación");
+}
+
+    
 
     const { rows } = await pool.query(
       'SELECT id, nombre, rol, estado FROM public.perfiles WHERE id = $1',
