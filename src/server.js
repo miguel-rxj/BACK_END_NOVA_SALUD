@@ -1,9 +1,19 @@
-const app = require('./app');
+import { app } from './app.js';
+import { config } from './config.js';
+import { logger } from './logger.js';
+import { pool } from './db.js';
 
-// Configurar el puerto del servidor (por defecto 3000 o el provisto por el entorno)
-const port = Number(process.env.PORT) || 3000;
-
-// Iniciar el servidor escuchando en todas las interfaces de red ('0.0.0.0')
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Botica API en puerto ${port}`);
+const server = app.listen(config.PORT, () => {
+  logger.info(`API escuchando en http://localhost:${config.PORT} (docs: /api/docs)`);
 });
+
+async function shutdown(signal) {
+  logger.info(`${signal} recibido, cerrando...`);
+  server.close(async () => {
+    await pool.end();
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

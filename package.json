@@ -2,22 +2,31 @@
   "name": "botica-api",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "check": "node --check src/server.js"
-  },
+  "type": "module",
+  "description": "API REST de inventario, ventas y compras para la botica",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file=.env src/server.js",
+    "start": "node src/server.js",
+    "test": "node --env-file=.env.test --test tests/api.test.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "express-rate-limit": "^7.5.0",
-    "helmet": "^8.0.0",
-    "pg": "^8.13.1",
-    "zod": "^3.24.2"
-  }
+    "@supabase/supabase-js": "^2.119.0",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.3",
+    "helmet": "^8.3.0",
+    "jose": "^6.2.15",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4.6.7"
+  },
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

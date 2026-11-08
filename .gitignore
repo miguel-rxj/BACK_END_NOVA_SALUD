@@ -1,23 +1,4 @@
-
-# Variables de entorno
+node_modules
 .env
-.env.*
-!.env.example
-
-# Dependencias
-node_modules/
-
-# Certificados
-certs/
-*.pem
-*.key
-*.p12
-*.pfx
-
-# Logs
+.env.test
 *.log
-logs/
-
-# Sistema
-.DS_Store
-Thumbs.db

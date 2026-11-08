@@ -1,85 +1,152 @@
-# API REST de Botica — Express + Supabase PostgreSQL
+# Botica API
 
-Implementada sobre el SQL entregado. No modifica el esquema. Las operaciones de stock invocan las funciones existentes de PostgreSQL. **No se ha ejecutado contra una base real.**
+API REST (Node.js + Express 5) para inventario, ventas y compras. Se conecta a PostgreSQL de Supabase
+y usa Supabase Auth para el login. El frontend **solo** habla con esta API, nunca con Supabase.
 
-## Preparación
+## 1. Puesta en marcha
 
-1. Node.js 20+. `npm install`.
-2. Copiar `.env.example` a `.env` y rellenar las variables. **No subir `.env` a Git.**
-3. `DATABASE_URL`: usar **Supabase Connect → Transaction pooler** (puerto 6543), usuario/host reales. `DATABASE_SSL=true` valida certificados; si el entorno no confía en la CA, configurar la CA adecuada en Node, no desactivar verificación en producción.
-4. `SUPABASE_ANON_KEY`: clave pública/publishable compatible con Supabase Auth; nunca usar service_role en frontend.
-5. Crear usuarios en Supabase Auth y activar al primer administrador según el SQL entregado.
-6. `npm run dev` localmente, `npm start` en Render. Health: `/api/health`.
-7. Render: Web Service Free; Build `npm install` (o `npm ci` después de generar/subir lockfile); Start `npm start`. Configurar variables de entorno y `FRONTEND_URL=https://tu-app.vercel.app`.
-8. Vercel: `VITE_API_URL=https://tu-backend.onrender.com`, redeploy.
-
-## Autenticación
-
-`POST /api/auth/login` con `{ "email":"...", "password":"..." }` devuelve `access_token`, `refresh_token`, `expires_at` y `usuario`. En rutas protegidas enviar `Authorization: Bearer ACCESS_TOKEN`. El backend comprueba el token contra Supabase Auth y consulta `perfiles` activo. **No incluye endpoint de refresh:** para sesiones largas, usar `supabase.auth.refreshSession` en el frontend o implementar un endpoint de renovación controlado.
-
-## Endpoints
-
-| Método | Ruta | Permiso | Descripción |
-|---|---|---|---|
-| GET | `/api/health` | público | Salud |
-| POST | `/api/auth/login` | público | Login |
-| GET | `/api/auth/me` | activo | Perfil |
-| GET | `/api/categorias`, `/api/categorias/:id` | activo | Categorías |
-| POST, PATCH | `/api/categorias`, `/api/categorias/:id` | admin | Alta / edición |
-| GET | `/api/contactos`, `/api/contactos/:id` | activo | Clientes y proveedores |
-| POST, PATCH | `/api/contactos`, `/api/contactos/:id` | admin | Alta / edición |
-| GET | `/api/productos?q=&estado=&limit=&offset=`, `/api/productos/:id` | activo | Catálogo y stock |
-| POST, PATCH | `/api/productos`, `/api/productos/:id` | admin | Alta / edición, desactivar con PATCH |
-| GET | `/api/inventario/stock` | activo | Stock disponible |
-| GET | `/api/inventario/lotes` | activo | Lotes |
-| GET | `/api/inventario/alertas/reposicion` | activo | Reposición |
-| GET | `/api/inventario/alertas/vencimiento` | activo | Vencimientos |
-| GET | `/api/inventario/movimientos?limit=&offset=` | activo | Kardex |
-| POST | `/api/ventas` | activo | Registrar venta con FEFO |
-| POST | `/api/compras` | admin | Registrar compra y lotes |
-| GET | `/api/operaciones?tipo=&limit=&offset=`, `/api/operaciones/:id` | activo | Historial y detalle |
-| POST | `/api/operaciones/:id/anular` | admin | Anulación |
-| POST | `/api/inventario/ajustes` | admin | Ajuste de stock |
-| GET | `/api/usuarios` | admin | Perfiles |
-| PATCH | `/api/usuarios/:id` | admin | Activar / rol / nombre |
-
-Todas las rutas GET de colección devuelven **arrays JSON**; `GET /api/operaciones/:id` devuelve la operación con `detalles`. Las altas de catálogo devuelven el registro. Las ventas/compras devuelven `{ "resultado": ID_OPERACION }`. Errores: `{ "error": "...", "codigo": "NS001" }` o validación `{ "error": "Datos inválidos", "detalles": [...] }`.
-
-## Ejemplos
-
-Venta: `POST /api/ventas`
-```json
-{"items":[{"id_producto":1,"cantidad":2}],"id_contacto":null,"metodo_pago":"efectivo"}
+```bash
+npm install
+cp .env.example .env      # completa los valores (ver abajo)
+npm run dev               # http://localhost:3000   ·   docs en /api/docs
 ```
 
-Compra: `POST /api/compras`
-```json
-{"id_contacto":1,"items":[{"id_producto":1,"cantidad":20,"precio_unitario":0.5,"codigo_lote":"ABC-2026","fecha_vencimiento":"2027-12-31"}],"metodo_pago":"efectivo"}
-```
+| Variable | De dónde sale |
+|---|---|
+| `DATABASE_URL` | Supabase → Connect → **Transaction pooler** (puerto 6543). Sin `?sslmode=` al final |
+| `DB_SSL` | `true` con Supabase, `false` con Postgres local |
+| `SUPABASE_URL` | Project Settings → API |
+| `SUPABASE_ANON_KEY` | Clave pública (`anon` o `publishable`). Solo se usa para login/refresh |
+| `SUPABASE_SERVICE_ROLE_KEY` | Clave secreta (`service_role` o `secret`). **Solo en el servidor**, nunca en el frontend ni en Git |
+| `SUPABASE_JWT_SECRET` | Déjalo vacío (proyectos con claves asimétricas). Solo para proyectos con secreto HS256 legado |
+| `CORS_ORIGINS` | URLs del frontend separadas por coma (ej. `http://localhost:5173,https://mi-app.vercel.app`) |
 
-Anulación: `POST /api/operaciones/1/anular` → `{ "motivo": "Error de registro" }`.
+Antes de arrancar: ejecutar `database/schema.sql` y luego `database/seed.sql` (instrucciones dentro de cada archivo)
+y, en Supabase → Authentication → Sign In / Providers, **desactivar los registros públicos**.
 
-Ajuste: `POST /api/inventario/ajustes` → `{ "id_lote": 1, "delta": -2, "motivo": "Merma" }`.
+**Pruebas:** `cp .env.test.example .env.test`, apuntarlo a una base de **desarrollo** y `npm test`
+(9 pruebas: permisos, validación, intentos de inyección SQL, FEFO, stock insuficiente, anulaciones, kardex).
 
-Frontend:
+## 2. Contrato
+
+- Base: `/api/v1`. JSON. `Authorization: Bearer <access_token>`. Express acepta rutas con y sin `/` final.
+- Éxito: `{ "data": ..., "meta": { page, page_size, total, total_pages } }` (`meta` solo en listas paginadas).
+- Error: `{ "error": { "code": "...", "message": "...", "details": [{ "en", "campo", "mensaje" }] } }`.
+- Paginación: `?page=1&page_size=20` (máx. 100). Orden: `?sort=nombre` o `?sort=-nombre`. Búsqueda: `?search=texto`.
+- Fechas ISO 8601 (`fecha_vencimiento` como `YYYY-MM-DD`). Dinero y cantidades llegan como **números**, no texto.
+- Documentación interactiva: `/api/docs` · JSON importable en Postman: `/api/openapi.json`.
+
+### Roles
+| | vendedor | admin |
+|---|---|---|
+| Buscar productos (solo activos), ver stock y alertas | ✅ | ✅ |
+| Registrar ventas, ver **solo sus** ventas | ✅ | ✅ (todas) |
+| Clientes: listar, crear, editar | ✅ | ✅ |
+| Proveedores, productos, categorías, usuarios | ❌ | ✅ |
+| Compras, ajustes de stock, anular, kardex, lotes, dashboard | ❌ | ✅ |
+
+### Endpoints
+| Método | Ruta | Quién |
+|---|---|---|
+| POST | `/auth/login` · `/auth/refresh` | público |
+| GET / POST | `/auth/me` · `/auth/logout` | autenticado |
+| GET, POST, PATCH | `/usuarios`, `/usuarios/:id` | admin |
+| GET / POST / PATCH | `/categorias`, `/categorias/:id` | todos / admin |
+| GET, POST, PATCH | `/contactos`, `/contactos/:id` | todos (vendedor solo clientes) |
+| GET | `/productos?search=&codigo_barras=&id_categoria=&nivel_stock=&sort=` · `/productos/:id` | todos |
+| POST, PATCH | `/productos`, `/productos/:id` | admin |
+| GET / POST | `/lotes` · `/lotes/:id/ajustes` | admin |
+| GET, POST | `/ventas`, `/ventas/:id` | todos |
+| POST | `/ventas/:id/anular` | admin |
+| GET, POST | `/compras`, `/compras/:id` · POST `/compras/:id/anular` | admin |
+| GET | `/alertas/reposicion` · `/alertas/vencimiento` · `/alertas/resumen` | todos |
+| GET | `/movimientos` (kardex) · `/reportes/resumen` | admin |
+
+### Códigos de error
+| HTTP | `code` | Cuándo |
+|---|---|---|
+| 401 | `NO_AUTENTICADO`, `TOKEN_INVALIDO`, `TOKEN_EXPIRADO`, `CREDENCIALES_INVALIDAS` | sin sesión o sesión vencida |
+| 403 | `SIN_PERMISO`, `USUARIO_INACTIVO` | rol insuficiente |
+| 404 | `NO_ENCONTRADO` | no existe (o no te pertenece) |
+| 409 | `STOCK_INSUFICIENTE`, `DUPLICADO`, `REFERENCIA_INVALIDA` | conflicto de negocio |
+| 422 | `VALIDACION` (con `details`), `DATOS_INVALIDOS` | datos mal formados |
+| 429 | `DEMASIADOS_INTENTOS`, `DEMASIADAS_PETICIONES` | límite de peticiones |
+
+## 3. Guía para el frontend
+
 ```js
-const API = import.meta.env.VITE_API_URL;
-const response = await fetch(`${API}/api/productos`, {
-  headers: { Authorization: `Bearer ${accessToken}` }
+// src/api/client.js
+import axios from 'axios';
+
+const base = `${import.meta.env.VITE_API_URL}/api/v1`;
+export const api = axios.create({ baseURL: base });
+
+api.interceptors.request.use((cfg) => {
+  const t = localStorage.getItem('access_token');
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
 });
-const productos = await response.json();
+
+let refreshing = null;
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const orig = error.config;
+    const code = error.response?.data?.error?.code;
+    if (error.response?.status === 401 && code === 'TOKEN_EXPIRADO' && !orig._retry) {
+      orig._retry = true;
+      refreshing ??= axios
+        .post(`${base}/auth/refresh`, { refresh_token: localStorage.getItem('refresh_token') })
+        .finally(() => { refreshing = null; });
+      try {
+        const { data } = await refreshing;
+        localStorage.setItem('access_token', data.data.access_token);
+        localStorage.setItem('refresh_token', data.data.refresh_token);
+        orig.headers.Authorization = `Bearer ${data.data.access_token}`;
+        return api(orig);
+      } catch {
+        localStorage.clear();
+        window.location.assign('/login');
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 ```
 
-## Seguridad y consideraciones antes de producción
+- Mostrar errores: `error.response.data.error.message`; para formularios, `details[].campo` indica el campo.
+- **Registrar venta:** `POST /ventas` con `{ id_contacto?, metodo_pago, items: [{ id_producto, cantidad }] }`.
+  No se envía precio: lo toma el servidor. La respuesta ya trae la venta completa para el comprobante.
+  Deshabilita el botón mientras la petición está en curso para no registrar la venta dos veces.
+- **Lector de código de barras:** `GET /productos?codigo_barras=...`.
+- **Campanita de alertas:** `GET /alertas/resumen` cada 30 s (`refetchInterval` de TanStack Query).
 
-- SQL parametrizado `$1`, `$2`; nombres de tablas/columnas solo constantes internas, nunca valores del usuario.
-- Zod valida estructuras y tipos. El `id_usuario` de venta/compra/ajuste se obtiene del token validado, nunca del body.
-- No se exponen endpoints de DELETE, ni UPDATE directo de lotes o kardex.
-- Las funciones SQL se ejecutan con la conexión Postgres, que debe custodiarse exclusivamente en el servidor.
-- **Revisar privilegios de la cuenta Postgres**: el SQL original habilita RLS para roles de API, pero una cuenta con privilegios elevados o BYPASSRLS puede saltarse RLS. Para producción usar un rol dedicado con privilegios mínimos y acceso solo a operaciones autorizadas.
-- El SQL original permite que un admin activo modifique `perfiles`; hay que auditar cambios de roles y evitar desactivar el último admin.
-- No incluye pruebas integradas con una base real, pruebas de concurrencia, idempotencia de pagos, protección específica de datos personales ni documentación OpenAPI. No afirmar que está certificado para producción.
-- El SQL de prueba incluye correos de ejemplo; no deben copiarse al código ni a logs públicos.
+### Validaciones que conviene replicar en el formulario (solo UX)
+La API vuelve a validar todo; esto evita viajes de ida y vuelta.
 
-## Arquitectura modular
-`src/server.js` inicia el servidor; `src/app.js` configura Express; `src/routes` contiene rutas por dominio; `src/validators` valida entrada; `src/middlewares` maneja autenticación y errores; `src/config` conecta PostgreSQL y Supabase; `src/utils/crud.js` contiene generadores CRUD con columnas de lista blanca. Las rutas públicas mantienen el prefijo `/api`.
+| Campo | Regla |
+|---|---|
+| email | formato válido, máx. 254 |
+| password (usuarios) | 8 a 72 caracteres |
+| nombre (producto/contacto/categoría/usuario) | texto 2 a 150 (usuario 100, categoría 100) |
+| precio_venta / precio_unitario | número ≥ 0, máx. 2 decimales |
+| cantidad / stock_minimo | entero (cantidad ≥ 1) |
+| documento (contacto) | 6 a 20 letras o números, sin espacios |
+| teléfono | 6 a 20 caracteres: dígitos, `+ - ( )` y espacios |
+| fecha_vencimiento | `YYYY-MM-DD`, no pasada |
+| codigo_lote | 1 a 50 caracteres |
+| motivo (anular/ajustar) | 3 a 300 caracteres |
+| items | de 1 a 100 líneas |
+
+## 4. Seguridad (qué hace el backend por ti)
+- **Inyección SQL:** todas las consultas usan parámetros (`$1, $2…`); los nombres de columna de `sort` salen de una lista blanca;
+  el texto de `search` escapa `%` y `_`. El frontend no es la defensa: aunque envíes algo raro, no llega al SQL como código.
+- **Validación con Zod** en cada endpoint (los campos desconocidos se descartan).
+- **Autenticación:** el JWT de Supabase se verifica (firma, emisor, expiración) y el rol se lee de `perfiles` en cada petición:
+  desactivar a un usuario o cambiarle el rol surte efecto de inmediato.
+- `helmet`, CORS con lista blanca, límite de peticiones (300/min) y de intentos de login (10 fallidos/15 min), cuerpo máx. 100 KB.
+- Errores 500 sin detalles internos; logs con `pino` sin el header `Authorization`.
+
+## 5. Despliegue (Render / Railway)
+Build: `npm install` · Start: `npm start` · Node ≥ 20.6. Cargar las variables de la tabla de arriba en el panel del servicio
+(no se sube `.env`). Luego añadir la URL del backend como `VITE_API_URL` en Vercel y la URL de Vercel en `CORS_ORIGINS`.

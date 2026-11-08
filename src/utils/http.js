@@ -1,9 +1,7 @@
-const { ZodError } = require('zod');
+export const send = (res, data, status = 200) => res.status(status).json({ data });
 
-// Envuelve funciones asíncronas para capturar errores automáticamente en Express
-const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-
-// Crea un error personalizado con un código de estado HTTP específico
-const fail = (status, message) => Object.assign(new Error(message), { status });
-
-module.exports = { wrap, fail };
+export const sendPage = (res, rows, total, { page, page_size }) =>
+  res.json({
+    data: rows,
+    meta: { page, page_size, total, total_pages: Math.ceil(total / page_size) },
+  });

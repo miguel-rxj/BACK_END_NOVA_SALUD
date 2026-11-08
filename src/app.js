@@ -1,53 +1,74 @@
-// Inicializar conexiones
-require('./config/connections');
+import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
+import pinoHttp from 'pino-http';
+import swaggerUi from 'swagger-ui-express';
+import { config } from './config.js';
+import { logger } from './logger.js';
+import { query } from './db.js';
+import { openapi } from './docs/openapi.js';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import authRoutes from './routes/auth.js';
+import usuariosRoutes from './routes/usuarios.js';
+import categoriasRoutes from './routes/categorias.js';
+import contactosRoutes from './routes/contactos.js';
+import productosRoutes from './routes/productos.js';
+import lotesRoutes from './routes/lotes.js';
+import { ventasRouter, comprasRouter } from './routes/operaciones.js';
+import alertasRoutes from './routes/alertas.js';
+import movimientosRoutes from './routes/movimientos.js';
+import reportesRoutes from './routes/reportes.js';
 
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const { rateLimit } = require('express-rate-limit');
-const errorHandler = require('./middlewares/errors');
+export const app = express();
 
-const app = express();
-
-// Configuraciones de seguridad y cabeceras
+app.set('trust proxy', 1); // detrás del proxy de Render/Railway
 app.disable('x-powered-by');
+
+app.use(pinoHttp({ logger, autoLogging: !config.isTest }));
 app.use(helmet());
+app.use(cors({
+  origin: (origin, cb) => cb(null, !origin || config.corsOrigins.includes(origin)),
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 600,
+}));
+app.use(rateLimit({
+  windowMs: 60 * 1000,
+  limit: 300,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: () => config.isTest,
+  handler: (_req, res) =>
+    res.status(429).json({ error: { code: 'DEMASIADAS_PETICIONES', message: 'Demasiadas peticiones, intenta en un momento' } }),
+}));
+app.use(express.json({ limit: '100kb' }));
 
-// Configuración de CORS basada en las URLs permitidas del frontend
-const allowed = process.env.FRONTEND_URL.split(',').map((x) => x.trim());
-app.use(
-  cors({
-    origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)),
-  })
-);
+app.get('/health', async (_req, res) => {
+  try {
+    await query('SELECT 1');
+    res.json({ data: { status: 'ok' } });
+  } catch {
+    res.status(503).json({ error: { code: 'BD_NO_DISPONIBLE', message: 'Base de datos no disponible' } });
+  }
+});
 
-// Parseo de peticiones JSON con límite de tamaño
-app.use(express.json({ limit: '64kb' }));
+app.get('/api/openapi.json', (_req, res) => res.json(openapi));
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapi, { customSiteTitle: 'Botica API' }));
 
-// Limitador de tasa de peticiones (Rate Limiting) para la API
-app.use(
-  '/api',
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 200,
-    standardHeaders: 'draft-7',
-    legacyHeaders: false,
-  })
-);
+const v1 = express.Router();
+v1.use('/auth', authRoutes);
+v1.use('/usuarios', usuariosRoutes);
+v1.use('/categorias', categoriasRoutes);
+v1.use('/contactos', contactosRoutes);
+v1.use('/productos', productosRoutes);
+v1.use('/lotes', lotesRoutes);
+v1.use('/ventas', ventasRouter);
+v1.use('/compras', comprasRouter);
+v1.use('/alertas', alertasRoutes);
+v1.use('/movimientos', movimientosRoutes);
+v1.use('/reportes', reportesRoutes);
+app.use('/api/v1', v1);
 
-// Ruta de verificación de estado (Health Check)
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
-
-// Registro dinámico de las rutas de la API
-const routeNames = ['auth', 'catalog', 'inventory', 'operations', 'users'];
-for (const name of routeNames) {
-  app.use('/api', require(`./routes/${name}.routes`));
-}
-
-// Manejador para rutas no encontradas (404)
-app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
-
-// Middleware centralizado de manejo de errores
+app.use(notFoundHandler);
 app.use(errorHandler);
-
-module.exports = app;
